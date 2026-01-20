@@ -1,4 +1,5 @@
 from spyruntime import SPyType, SPyValue, i32, spy_object, spy_type, get_type, struct
+from model import Box
 
 # prebuilt values to be used in tests, just to make typing easier
 v0 = i32(0)
@@ -55,3 +56,12 @@ def test_nested_struct():
     assert r.a.y == v2
     assert r.b.x == v3
     assert r.b.y == v4
+
+
+def test_Box():
+    BT = Box[i32]
+    assert BT.name == "Box[i32]"
+    assert repr(BT) == "<spy type Box[i32]>"
+    assert list(BT.fields.keys()) == ["base", "payload"]
+    BT2 = Box[i32]
+    assert BT is BT2
