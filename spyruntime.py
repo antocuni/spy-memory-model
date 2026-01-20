@@ -27,10 +27,10 @@ class blue_generic:
         return f"<@blue_generic {self.func.__name__}>"
 
 
-class SPyValue:
+class W_Value:
     """A value with an associated SPy type"""
 
-    def __init__(self, value: Any, spy_type: "SPyType"):
+    def __init__(self, value: Any, spy_type: "W_Type"):
         self._value = value
         self._spy_type = spy_type
 
@@ -38,12 +38,12 @@ class SPyValue:
         return f"<spy value {self._value}: {self._spy_type.name}>"
 
     def __eq__(self, other):
-        if isinstance(other, SPyValue):
+        if isinstance(other, W_Value):
             return self._value == other._value and self._spy_type == other._spy_type
         return NotImplemented
 
 
-class SPyType:
+class W_Type:
     def __init__(self, name: str):
         self.name = name
 
@@ -54,34 +54,36 @@ class SPyType:
         return self.name.startswith("Box[")
 
     def __call__(self, value):
-        """Allow instantiation: SPy_I32(42) returns SPyValue"""
-        return SPyValue(value, self)
+        """Allow instantiation: SPy_I32(42) returns W_Value"""
+        return W_Value(value, self)
 
     def __repr__(self):
         return f"<spy type {self.name}>"
 
 
 # Built-in types
-i32 = SPyType("i32")
-u8 = SPyType("u8")
-spy_object = SPyType("object")
-spy_type = SPyType("type")
+w_i32 = W_Type("i32")
+w_u8 = W_Type("u8")
+w_object = W_Type("object")
+w_type = W_Type("type")
+
+i32 = w_i32  # just for convenience of typing
 
 
 def get_type(x):
     """
     Moral equivalent to vm.dynamic_type
     """
-    if isinstance(x, SPyType):
-        return spy_type
-    elif isinstance(x, SPyValue):
+    if isinstance(x, W_Type):
+        return w_type
+    elif isinstance(x, W_Value):
         return x._spy_type
     else:
         raise TypeError
 
 
-class SPyStructType(SPyType):
-    def __init__(self, name: str, fields: dict[str, SPyType]) -> None:
+class W_StructType(W_Type):
+    def __init__(self, name: str, fields: dict[str, W_Type]) -> None:
         super().__init__(name)
         self.fields = fields
 
@@ -100,10 +102,10 @@ class SPyStructType(SPyType):
                     d[attr] = T()  # uninitialized
                 else:
                     d[attr] = None  # uninitialized
-        return SPyStructValue(d, self)
+        return W_StructValue(d, self)
 
 
-class SPyStructValue(SPyValue):
+class W_StructValue(W_Value):
     def __getattr__(self, attr):
         if attr in self._value:
             return self._value[attr]
@@ -126,10 +128,10 @@ def struct(cls=None):
     fields = {}
     assert hasattr(cls, "__annotations__")
     for field_name, field_type in cls.__annotations__.items():
-        assert isinstance(field_type, SPyType)
+        assert isinstance(field_type, W_Type)
         fields[field_name] = field_type
 
-    struct_type = SPyStructType(cls.__name__, fields)
+    struct_type = W_StructType(cls.__name__, fields)
     return struct_type
 
 
@@ -165,16 +167,16 @@ MEMORY = Memory()
 # ======= gc_box_ptr[T] and gc_box_alloc[T] ========
 
 
-class GcBoxPtrType(SPyType):
+class W_GcBoxPtrType(W_Type):
     def __init__(self, name, TO):
         super().__init__(name)
         self.TO = TO
 
     def __call__(self, addr):
-        return GcBoxPtrValue(addr, self)
+        return W_GcBoxPtrValue(addr, self)
 
 
-class GcBoxPtrValue(SPyValue):
+class W_GcBoxPtrValue(W_Value):
     @property
     def addr(self):
         return self._value
@@ -198,7 +200,7 @@ def gc_box_ptr(T):
     gc_box_ptr[T]: pointer to a GC-managed Box[T]
     """
     name = f"gc_box_ptr[{T.name}]"
-    return GcBoxPtrType(name, T)
+    return W_GcBoxPtrType(name, T)
 
 
 @blue_generic

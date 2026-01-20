@@ -7,22 +7,22 @@ In real world, this would be a .spy file.
 
 from spyruntime import (
     i32,
-    spy_type,
+    w_type,
     blue_generic,
     struct,
-    SPyType,
-    SPyValue,
+    W_Type,
+    W_Value,
     gc_box_ptr,
     gc_box_alloc,
     get_type,
-    GcBoxPtrType,
+    W_GcBoxPtrType,
 )
 
 
 @struct.mut
 class GcBase:
     ob_refcnt: i32
-    ob_type: spy_type
+    ob_type: w_type
 
 
 @blue_generic
@@ -45,7 +45,7 @@ def Box(T):
 # gc_box_alloc.
 
 
-class GcPtrType(SPyType):
+class W_GcPtrType(W_Type):
     """
     Thin wrapper around box_ptr[T].
 
@@ -77,13 +77,13 @@ class GcPtrType(SPyType):
     def from_box_ptr(self, box_ptr: "gc_box_ptr[T]") -> "gc_ptr[T]":
         # check that we got a ptr to the right Box[T]
         BOX_PTR_T = get_type(box_ptr)
-        assert isinstance(BOX_PTR_T, GcBoxPtrType)
+        assert isinstance(BOX_PTR_T, W_GcBoxPtrType)
         assert BOX_PTR_T.TO is self.TO
         addr = box_ptr._value
-        return GcPtrValue(addr, self)
+        return W_GcPtrValue(addr, self)
 
 
-class GcPtrValue(SPyValue):
+class W_GcPtrValue(W_Value):
     @property
     def addr(self):
         return self._value
@@ -112,7 +112,7 @@ def gc_ptr(T):
     gc_ptr[T]: pointer to a GC-managed T
     """
     name = f"gc_ptr[{T.name}]"
-    return GcPtrType(name, T)
+    return W_GcPtrType(name, T)
 
 
 @blue_generic

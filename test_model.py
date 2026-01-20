@@ -1,9 +1,8 @@
 from spyruntime import (
-    SPyType,
-    SPyValue,
+    W_Value,
     i32,
-    spy_object,
-    spy_type,
+    w_object,
+    w_type,
     get_type,
     struct,
     gc_box_alloc,
@@ -26,7 +25,7 @@ def test_spy_type_value():
     assert x == i32(1)
     assert x != y
     assert get_type(x) is i32
-    assert get_type(i32) is spy_type
+    assert get_type(i32) is w_type
 
 
 def test_struct():
