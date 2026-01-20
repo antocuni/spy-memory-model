@@ -132,6 +132,11 @@ def struct(cls=None):
         fields[field_name] = field_type
 
     struct_type = W_StructType(cls.__name__, fields)
+
+    # hack hack hack
+    if hasattr(cls, "spy_new"):
+        struct_type.spy_new = cls.spy_new
+
     return struct_type
 
 
@@ -210,14 +215,9 @@ def gc_box_alloc(T):
     """
     from model import Box
 
-    ## # this is the magic which makes is possible to call gc_alloc[str] and get a
-    ## # Box[StringObject] with ob_type==str
-    ## if is_reference_type(T):
-    ##     # __ref__ is a gc_ptr[PAYLOAD]
-    ##     PAYLOAD = T.fields["__ref__"].TO
-    ## else:
-    ##     PAYLOAD = T
-    PAYLOAD = T
+    # this is the magic which makes is possible to call gc_alloc[str] and get a
+    # Box[StringObject] with ob_type==str
+    PAYLOAD = gc_box_payload_type(T)
     BOX = Box[PAYLOAD]
 
     def impl() -> gc_box_ptr[PAYLOAD]:
@@ -228,3 +228,24 @@ def gc_box_alloc(T):
         return box_ptr
 
     return impl
+
+
+def gc_box_payload_type(T):
+    """
+    XXX explain me better
+    """
+    if is_reference_type(T):
+        # __ref__ is a gc_ptr[PAYLOAD]
+        return T.fields["__ref__"].TO
+    else:
+        return T
+
+
+def is_reference_type(T: W_Type) -> bool:
+    from model import W_GcPtrType
+
+    return (
+        T.is_struct()
+        and list(T.fields) == ["__ref__"]
+        and isinstance(T.fields["__ref__"], W_GcPtrType)
+    )

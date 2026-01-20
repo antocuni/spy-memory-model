@@ -16,6 +16,8 @@ from spyruntime import (
     gc_box_alloc,
     get_type,
     W_GcBoxPtrType,
+    is_reference_type,
+    gc_box_payload_type,
 )
 
 
@@ -27,7 +29,7 @@ class GcBase:
 
 @blue_generic
 def Box(T):
-    ## assert not is_reference_type(T)
+    assert not is_reference_type(T)
 
     @struct.mut
     class _Box:
@@ -75,10 +77,12 @@ class W_GcPtrType(W_Type):
         raise TypeError("Cannot create {self.name} directly: use .from_box_ptr")
 
     def from_box_ptr(self, box_ptr: "gc_box_ptr[T]") -> "gc_ptr[T]":
-        # check that we got a ptr to the right Box[T]
-        BOX_PTR_T = get_type(box_ptr)
+        # check that we got a ptr to the right Box[PAYLOAD]
+        BOX_PTR_T = get_type(box_ptr)  # e.g. gc_box_ptr[ObjectObject]
         assert isinstance(BOX_PTR_T, W_GcBoxPtrType)
-        assert BOX_PTR_T.TO is self.TO
+        T = BOX_PTR_T.TO  # e.g. ObjectObject
+        EXPECTED_T = gc_box_payload_type(self.TO)
+        assert T is EXPECTED_T
         addr = box_ptr._value
         return W_GcPtrValue(addr, self)
 
@@ -126,3 +130,37 @@ def gc_alloc(T):
         return gc_ptr[T].from_box_ptr(box_ptr)
 
     return impl
+
+
+# ======= high level object model ========
+
+
+@struct
+class ObjectObject:
+    "Implementation struct for object (empty)"
+
+
+@struct
+class spy_object:
+    """
+    The root of object hierarchy.
+
+    This is the "dual" of w_object. The relationship is the following:
+
+    - in the interpreter, the "object" type is implemented by w_object
+
+    - the C backend translates this type "model::spy_object" as usual and produces C
+      structs and accessor functions
+
+    - the C backend maps w_object to the type "model::spy_object"
+    """
+
+    # this is a special syntax: a struct with a single field "__ref__: gc_ptr[...]" is
+    # considered to be a reference type
+    __ref__: gc_ptr[ObjectObject]
+
+    @staticmethod
+    def spy_new():
+        "Equivalent for applevel __new__"
+        ptr = gc_alloc[spy_object]()
+        return spy_object(__ref__=ptr)

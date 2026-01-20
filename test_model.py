@@ -1,15 +1,15 @@
 from spyruntime import (
     W_Value,
     i32,
-    w_object,
     w_type,
     get_type,
     struct,
     gc_box_alloc,
     gc_box_ptr,
     MEMORY,
+    W_GcBoxPtrValue,
 )
-from model import Box, gc_ptr, gc_alloc
+from model import Box, gc_ptr, gc_alloc, spy_object, W_GcPtrValue, ObjectObject
 
 # prebuilt values to be used in tests, just to make typing easier
 v0 = i32(0)
@@ -123,3 +123,22 @@ def test_gc_alloc():
     # writing to the payload writes to the box
     assert box.payload.x == i32(1)
     assert box.payload.y == i32(2)
+
+
+def test_spy_object():
+    # instantiate an object, and check that we actually allocated a Box[ObjectObject]
+    obj = spy_object.spy_new()
+    ptr_obj = obj.__ref__
+    ptr_box = ptr_obj.as_box_ptr()
+
+    assert isinstance(ptr_obj, W_GcPtrValue)
+    assert isinstance(ptr_box, W_GcBoxPtrValue)
+    assert ptr_obj.addr == ptr_box.addr
+
+    BOX_PTR_T = get_type(ptr_box)
+    assert BOX_PTR_T is gc_box_ptr[spy_object]
+
+    box = MEMORY.mem[ptr_box.addr]
+    assert get_type(box) is Box[ObjectObject]
+    assert box.base.ob_type is spy_object
+    assert get_type(box.payload) is ObjectObject
