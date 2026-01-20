@@ -37,3 +37,21 @@ def test_struct():
     assert p.x == v3
     assert p.y == v4
     assert p._value == {"x": v3, "y": v4}
+
+
+def test_nested_struct():
+    @struct
+    class Point:
+        x: i32
+        y: i32
+
+    @struct
+    class Rect:
+        a: Point
+        b: Point
+
+    r = Rect(a=Point(x=v1, y=v2), b=Point(x=v3, y=v4))
+    assert r.a.x == v1
+    assert r.a.y == v2
+    assert r.b.x == v3
+    assert r.b.y == v4
