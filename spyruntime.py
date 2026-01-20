@@ -50,6 +50,9 @@ class SPyType:
     def is_struct(self) -> bool:
         return False
 
+    def is_box(self) -> bool:
+        return self.name.startswith("Box[")
+
     def __call__(self, value):
         """Allow instantiation: SPy_I32(42) returns SPyValue"""
         return SPyValue(value, self)
@@ -129,3 +132,87 @@ def struct(cls=None):
 # in real spy, we have mutable and immutable structs. Here, everything is mutable as we
 # don't have a real need to enfore immutability.
 struct.mut = struct
+
+
+# ======= typeded heap simulation =====
+
+
+class Memory:
+    def __init__(self):
+        self.mem = {0: "NULL"}
+
+    def alloc(self, T):
+        from model import GcBase
+
+        # we can allocate only GC-managed memory in this simulation
+        assert T.is_box()
+        addr = max(self.mem) + 100
+        self.mem[addr] = T(base=GcBase())  # uninitialized
+        return addr
+
+    def load(self, addr, expected_T):
+        v = self.mem[addr]
+        assert get_type(v) is expected_T
+        return v
+
+
+MEMORY = Memory()
+
+# ======= GC types and functions ======
+
+
+class GcBoxPtrType(SPyType):
+    def __init__(self, name, TO):
+        super().__init__(name)
+        self.TO = TO
+
+    def __call__(self, addr):
+        return GcBoxPtrValue(addr, self)
+
+
+class GcBoxPtrValue(SPyValue):
+    def __getattr__(self, attr):
+        from model import Box
+
+        # we expect to have a Box[T] at address "addr"
+        addr = self._value
+        BOX_PTR_T = self._spy_type  # gc_box_ptr[T]
+        T = BOX_PTR_T.TO
+        BOX_T = Box[T]
+        box = MEMORY.load(addr, BOX_T)
+
+        # now we can read the attribute from the box
+        return getattr(box, attr)
+
+
+@blue_generic
+def gc_box_ptr(T):
+    name = f"gc_box_ptr[{T.name}]"
+    return GcBoxPtrType(name, T)
+
+
+@blue_generic
+def gc_box_alloc(T):
+    """
+    Allocate a GC-managed Box[T] and return a gc_box_ptr[T]
+    """
+    from model import Box
+
+    ## # this is the magic which makes is possible to call gc_alloc[str] and get a
+    ## # Box[StringObject] with ob_type==str
+    ## if is_reference_type(T):
+    ##     # __ref__ is a gc_ptr[PAYLOAD]
+    ##     PAYLOAD = T.fields["__ref__"].TO
+    ## else:
+    ##     PAYLOAD = T
+    PAYLOAD = T
+    BOX = Box[PAYLOAD]
+
+    def impl() -> gc_box_ptr[PAYLOAD]:
+        addr = MEMORY.alloc(BOX)
+        box_ptr = gc_box_ptr[PAYLOAD](addr)
+        box_ptr.base.ob_refcnt = i32(1)
+        box_ptr.base.ob_type = T
+        return box_ptr
+
+    return impl

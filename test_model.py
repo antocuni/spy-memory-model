@@ -1,4 +1,14 @@
-from spyruntime import SPyType, SPyValue, i32, spy_object, spy_type, get_type, struct
+from spyruntime import (
+    SPyType,
+    SPyValue,
+    i32,
+    spy_object,
+    spy_type,
+    get_type,
+    struct,
+    gc_box_alloc,
+    gc_box_ptr,
+)
 from model import Box
 
 # prebuilt values to be used in tests, just to make typing easier
@@ -63,5 +73,19 @@ def test_Box():
     assert BT.name == "Box[i32]"
     assert repr(BT) == "<spy type Box[i32]>"
     assert list(BT.fields.keys()) == ["base", "payload"]
+    assert BT.is_box()
     BT2 = Box[i32]
     assert BT is BT2
+
+
+def test_gc_box_alloc():
+    ptr_box = gc_box_alloc[i32]()
+    # the static type is gc_box_ptr[i32]
+    assert get_type(ptr_box) is gc_box_ptr[i32]
+
+    # the type stored in the gc header is i32
+    assert ptr_box.base.ob_refcnt == i32(1)
+    assert ptr_box.base.ob_type is i32
+
+    # the payload is uninitialized
+    assert ptr_box.payload is None
