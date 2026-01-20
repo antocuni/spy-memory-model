@@ -102,6 +102,14 @@ class SPyStructValue(SPyValue):
             return self._value[attr]
         raise AttributeError(attr)
 
+    def __setattr__(self, attr, value):
+        if attr in ("_spy_type", "_value"):
+            super().__setattr__(attr, value)
+        elif attr in self._spy_type.fields:
+            self._value[attr] = value
+        else:
+            raise AttributeError(value)
+
 
 def struct(cls=None):
     """
@@ -116,3 +124,8 @@ def struct(cls=None):
 
     struct_type = SPyStructType(cls.__name__, fields)
     return struct_type
+
+
+# in real spy, we have mutable and immutable structs. Here, everything is mutable as we
+# don't have a real need to enfore immutability.
+struct.mut = struct
