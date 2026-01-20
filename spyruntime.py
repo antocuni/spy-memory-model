@@ -31,16 +31,16 @@ class SPyValue:
     """A value with an associated SPy type"""
 
     def __init__(self, value: Any, spy_type: "SPyType"):
-        self.value = value
-        self.spy_type = spy_type
+        self._value = value
+        self._spy_type = spy_type
 
     def __repr__(self):
-        return f"<spy value {self.value}: {self.spy_type.name}>"
+        return f"<spy value {self._value}: {self._spy_type.name}>"
 
     def __eq__(self, other):
         if isinstance(other, SPyValue):
-            return self.value == other.value and self.spy_type == other.spy_type
-        return self.value == other
+            return self._value == other._value and self._spy_type == other._spy_type
+        return NotImplemented
 
 
 class SPyType:
@@ -72,6 +72,47 @@ def get_type(x):
     if isinstance(x, SPyType):
         return spy_type
     elif isinstance(x, SPyValue):
-        return x.spy_type
+        return x._spy_type
     else:
         raise TypeError
+
+
+class SPyStructType(SPyType):
+    def __init__(self, name: str, fields: dict[str, SPyType]) -> None:
+        super().__init__(name)
+        self.fields = fields
+
+    def is_struct(self) -> bool:
+        return True
+
+    def __call__(self, **kwargs):
+        for key in kwargs:
+            if key not in self.fields:
+                raise TypeError(f"unexpected argument: {key}")
+        d = kwargs.copy()
+        for attr in self.fields:
+            if attr not in d:
+                d[attr] = None  # uninitialized
+        return SPyStructValue(d, self)
+
+
+class SPyStructValue(SPyValue):
+    def __getattr__(self, attr):
+        if attr in self._value:
+            return self._value[attr]
+        raise AttributeError(attr)
+
+
+def struct(cls=None):
+    """
+    @struct decorator
+    """
+
+    fields = {}
+    assert hasattr(cls, "__annotations__")
+    for field_name, field_type in cls.__annotations__.items():
+        assert isinstance(field_type, SPyType)
+        fields[field_name] = field_type
+
+    struct_type = SPyStructType(cls.__name__, fields)
+    return struct_type
