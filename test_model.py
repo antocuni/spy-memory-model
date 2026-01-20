@@ -8,11 +8,9 @@ from spyruntime import (
     struct,
     gc_box_alloc,
     gc_box_ptr,
-    gc_ptr,
-    gc_alloc,
     MEMORY,
 )
-from model import Box
+from model import Box, gc_ptr, gc_alloc
 
 # prebuilt values to be used in tests, just to make typing easier
 v0 = i32(0)
