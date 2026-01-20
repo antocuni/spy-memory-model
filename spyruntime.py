@@ -95,7 +95,11 @@ class SPyStructType(SPyType):
         d = kwargs.copy()
         for attr in self.fields:
             if attr not in d:
-                d[attr] = None  # uninitialized
+                T = self.fields[attr]
+                if T.is_struct():
+                    d[attr] = T()  # uninitialized
+                else:
+                    d[attr] = None  # uninitialized
         return SPyStructValue(d, self)
 
 
@@ -158,7 +162,7 @@ class Memory:
 
 MEMORY = Memory()
 
-# ======= GC types and functions ======
+# ======= gc_box_ptr[T] and gc_box_alloc[T] ========
 
 
 class GcBoxPtrType(SPyType):
@@ -171,15 +175,18 @@ class GcBoxPtrType(SPyType):
 
 
 class GcBoxPtrValue(SPyValue):
+    @property
+    def addr(self):
+        return self._value
+
     def __getattr__(self, attr):
         from model import Box
 
         # we expect to have a Box[T] at address "addr"
-        addr = self._value
         BOX_PTR_T = self._spy_type  # gc_box_ptr[T]
         T = BOX_PTR_T.TO
         BOX_T = Box[T]
-        box = MEMORY.load(addr, BOX_T)
+        box = MEMORY.load(self.addr, BOX_T)
 
         # now we can read the attribute from the box
         return getattr(box, attr)
@@ -187,6 +194,9 @@ class GcBoxPtrValue(SPyValue):
 
 @blue_generic
 def gc_box_ptr(T):
+    """
+    gc_box_ptr[T]: pointer to a GC-managed Box[T]
+    """
     name = f"gc_box_ptr[{T.name}]"
     return GcBoxPtrType(name, T)
 
@@ -214,5 +224,66 @@ def gc_box_alloc(T):
         box_ptr.base.ob_refcnt = i32(1)
         box_ptr.base.ob_type = T
         return box_ptr
+
+    return impl
+
+
+# ======= gc_ptr[T] and gc_alloc[T] ========
+
+
+class GcPtrType(SPyType):
+    def __init__(self, name, TO):
+        super().__init__(name)
+        self.TO = TO
+
+    def __call__(self, addr):
+        raise TypeError("Cannot create {self.name} directly: use .from_box_ptr")
+
+    def from_box_ptr(self, box_ptr: "gc_box_ptr[T]") -> "gc_ptr[T]":
+        # check that we got a ptr to the right Box[T]
+        BOX_PTR_T = get_type(box_ptr)
+        assert isinstance(BOX_PTR_T, GcBoxPtrType)
+        assert BOX_PTR_T.TO is self.TO
+        addr = box_ptr._value
+        return GcPtrValue(addr, self)
+
+
+class GcPtrValue(SPyValue):
+    @property
+    def addr(self):
+        return self._value
+
+    def as_box_ptr(self) -> "gc_box_ptr[T]":
+        T = self._spy_type.TO
+        return gc_box_ptr[T](self.addr)
+
+    def __getattr__(self, attr):
+        # reading from gc_ptr[T] is equivalent to read from gc_box_ptr[T].payload
+        box_ptr = self.as_box_ptr()
+        return getattr(box_ptr.payload, attr)
+
+    def __setattr__(self, attr, value):
+        if attr in ("_value", "_spy_type"):
+            super().__setattr__(attr, value)
+        else:
+            # writing to gc_ptr[T] is equivalent to write to gc_box_ptr[T].payload
+            box_ptr = self.as_box_ptr()
+            setattr(box_ptr.payload, attr, value)
+
+
+@blue_generic
+def gc_ptr(T):
+    """
+    gc_ptr[T]: pointer to a GC-managed T
+    """
+    name = f"gc_ptr[{T.name}]"
+    return GcPtrType(name, T)
+
+
+@blue_generic
+def gc_alloc(T):
+    def impl() -> gc_ptr[T]:
+        box_ptr = gc_box_alloc[T]()
+        return gc_ptr[T].from_box_ptr(box_ptr)
 
     return impl
