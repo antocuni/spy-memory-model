@@ -13,7 +13,6 @@ from spyruntime import (
     W_Type,
     W_Value,
     get_type,
-    is_reference_type,
     Box,
     GcBase,
     gc_ptr,
@@ -52,5 +51,5 @@ class spy_object:
     @staticmethod
     def spy_new():
         "Equivalent for applevel __new__"
-        ptr = gc_alloc[spy_object]()
+        ptr = gc_alloc[ObjectObject, spy_object]()
         return spy_object(__ref__=ptr)

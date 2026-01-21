@@ -19,8 +19,10 @@ class blue_generic:
 
     def __getitem__(self, key: Any):
         """Allow square bracket syntax: fn[x]"""
+        if not isinstance(key, tuple):
+            key = (key,)
         if key not in self.cache:
-            self.cache[key] = self.func(key)
+            self.cache[key] = self.func(*key)
         return self.cache[key]
 
     def __repr__(self):
@@ -174,33 +176,10 @@ class Memory:
 MEMORY = Memory()
 
 
-
-def is_reference_type(T: W_Type) -> bool:
-    # Check if T is a reference type (has a single __ref__ field of type gc_ptr)
-    # We need to check this carefully to avoid circular imports
-    return (
-        T.is_struct()
-        and list(T.fields) == ["__ref__"]
-        and hasattr(T.fields["__ref__"], "TO")  # gc_ptr has a TO attribute
-        and T.fields["__ref__"].name.startswith("gc_ptr[")
-    )
-
-
-def gc_ptr_payload_type(T):
-    """
-    Return the payload type for a gc_ptr[T].
-    For reference types, returns the TO of the __ref__ field.
-    For other types, returns T itself.
-    """
-    if is_reference_type(T):
-        return T.fields["__ref__"].TO
-    else:
-        return T
-
-
 @blue_generic
 def Box(T):
-    assert not is_reference_type(T)
+    if T.is_struct():
+        assert "__ref__" not in T.fields
 
     @struct.mut
     class _Box:
@@ -239,16 +218,14 @@ class W_GcPtrValue(W_Value):
     def gc_base(self):
         """Access the GC base (refcount and type) of the allocated object"""
         T = self._spy_type.TO
-        PAYLOAD = gc_ptr_payload_type(T)
-        BOX_T = Box[PAYLOAD]
+        BOX_T = Box[T]
         box = MEMORY.load(self.addr, BOX_T)
         return box.base
 
     def __getattr__(self, attr):
-        # Load the box from memory and access the payload
+        # gc_ptr[T] always points to Box[T], access the payload
         T = self._spy_type.TO
-        PAYLOAD = gc_ptr_payload_type(T)
-        BOX_T = Box[PAYLOAD]
+        BOX_T = Box[T]
         box = MEMORY.load(self.addr, BOX_T)
         return getattr(box.payload, attr)
 
@@ -256,10 +233,9 @@ class W_GcPtrValue(W_Value):
         if attr in ("_value", "_spy_type"):
             super().__setattr__(attr, value)
         else:
-            # Load the box from memory and set on the payload
+            # gc_ptr[T] always points to Box[T], set on the payload
             T = self._spy_type.TO
-            PAYLOAD = gc_ptr_payload_type(T)
-            BOX_T = Box[PAYLOAD]
+            BOX_T = Box[T]
             box = MEMORY.load(self.addr, BOX_T)
             setattr(box.payload, attr, value)
 
@@ -274,23 +250,42 @@ def gc_ptr(T):
 
 
 @blue_generic
-def gc_alloc(T):
+def gc_alloc(LLTYPE, HLTYPE=None):
     """
-    Allocate a GC-managed instance of T, return a gc_ptr[T].
-    This implicitly allocates a Box[PAYLOAD] where PAYLOAD depends on T.
+    Allocate a GC-managed object.
+
+    - LLTYPE must be a value type and it's the payload.
+
+    - HLTYPE is the type that it's stored in gc_base.ob_type, and it's what is returned
+      by get_type().
+
+    We support two kinds of invocation:
+
+    - gc_alloc[T]: in this case, the dynamic type is equal to the payload type. E.g. if
+      you have a `@struct Point`, you can gc_alloc[Point]().
+
+    - gc_alloc[T, V] if you want to customize the dynamic type. The main use case is to
+      allocate reference types, e.g. gc_alloc[ObjectObject, spy_object].
+
+    Under the hood, it allocates a Box[T], which contains the needed GC header, but this
+    is transparent to the user.
+
+    In both cases, it returns gc_ptr[T].
     """
+    if LLTYPE.is_box():
+        raise TypeError(f"Cannot allocate a Box type: {LLTYPE.name}")
 
-    def impl() -> gc_ptr[T]:
-        if T.is_box():
-            raise TypeError(f"Cannot allocate a Box type: {T.name}")
+    if HLTYPE is None:
+        HLTYPE = LLTYPE
+    else:
+        assert HLTYPE.fields == {"__ref__": gc_ptr[LLTYPE]}
 
-        PAYLOAD = gc_ptr_payload_type(T)
-        BOX_T = Box[PAYLOAD]
-
+    def impl() -> gc_ptr[LLTYPE]:
+        BOX_T = Box[LLTYPE]
         addr = MEMORY.alloc(BOX_T)
-        ptr = gc_ptr[T](addr)
+        ptr = gc_ptr[LLTYPE](addr)
         ptr.gc_base.ob_refcnt = i32(1)
-        ptr.gc_base.ob_type = T
+        ptr.gc_base.ob_type = HLTYPE
         return ptr
 
     return impl

@@ -124,9 +124,10 @@ def test_spy_object():
     ptr_obj = obj.__ref__
 
     assert isinstance(ptr_obj, W_GcPtrValue)
-    assert get_type(ptr_obj) is gc_ptr[spy_object]
+    # gc_alloc[ObjectObject, spy_object] returns gc_ptr[ObjectObject]
+    assert get_type(ptr_obj) is gc_ptr[ObjectObject]
 
-    # The gc_ptr[spy_object] points to a Box[ObjectObject] in memory
+    # The gc_ptr[ObjectObject] points to a Box[ObjectObject] in memory
     box = MEMORY.mem[ptr_obj.addr]
     assert get_type(box) is Box[ObjectObject]
     assert box.base.ob_type is spy_object
