@@ -173,82 +173,29 @@ class Memory:
 
 MEMORY = Memory()
 
-# ======= gc_box_ptr[T] and gc_box_alloc[T] ========
-
-
-class W_GcBoxPtrType(W_Type):
-    def __init__(self, name, TO):
-        super().__init__(name)
-        self.TO = TO
-
-    def __call__(self, addr):
-        return W_GcBoxPtrValue(addr, self)
-
-
-class W_GcBoxPtrValue(W_Value):
-    @property
-    def addr(self):
-        return self._value
-
-    def __getattr__(self, attr):
-        # we expect to have a Box[T] at address "addr"
-        BOX_PTR_T = self._spy_type  # gc_box_ptr[T]
-        T = BOX_PTR_T.TO
-        BOX_T = Box[T]
-        box = MEMORY.load(self.addr, BOX_T)
-
-        # now we can read the attribute from the box
-        return getattr(box, attr)
-
-
-@blue_generic
-def gc_box_ptr(T):
-    """
-    gc_box_ptr[T]: pointer to a GC-managed Box[T]
-    """
-    name = f"gc_box_ptr[{T.name}]"
-    return W_GcBoxPtrType(name, T)
-
-
-@blue_generic
-def gc_box_alloc(T):
-    """
-    Allocate a GC-managed Box[T] and return a gc_box_ptr[T]
-    """
-    # this is the magic which makes is possible to call gc_alloc[str] and get a
-    # Box[StringObject] with ob_type==str
-    PAYLOAD = gc_box_payload_type(T)
-    BOX = Box[PAYLOAD]
-
-    def impl() -> gc_box_ptr[PAYLOAD]:
-        addr = MEMORY.alloc(BOX)
-        box_ptr = gc_box_ptr[PAYLOAD](addr)
-        box_ptr.base.ob_refcnt = i32(1)
-        box_ptr.base.ob_type = T
-        return box_ptr
-
-    return impl
-
-
-def gc_box_payload_type(T):
-    """
-    XXX explain me better
-    """
-    if is_reference_type(T):
-        # __ref__ is a gc_ptr[PAYLOAD]
-        return T.fields["__ref__"].TO
-    else:
-        return T
 
 
 def is_reference_type(T: W_Type) -> bool:
-    from model import W_GcPtrType
-
+    # Check if T is a reference type (has a single __ref__ field of type gc_ptr)
+    # We need to check this carefully to avoid circular imports
     return (
         T.is_struct()
         and list(T.fields) == ["__ref__"]
-        and isinstance(T.fields["__ref__"], W_GcPtrType)
+        and hasattr(T.fields["__ref__"], "TO")  # gc_ptr has a TO attribute
+        and T.fields["__ref__"].name.startswith("gc_ptr[")
     )
+
+
+def gc_ptr_payload_type(T):
+    """
+    Return the payload type for a gc_ptr[T].
+    For reference types, returns the TO of the __ref__ field.
+    For other types, returns T itself.
+    """
+    if is_reference_type(T):
+        return T.fields["__ref__"].TO
+    else:
+        return T
 
 
 @blue_generic
@@ -263,3 +210,87 @@ def Box(T):
     name = f"Box[{T.name}]"
     _Box.name = name
     return _Box
+
+
+# ======= gc_ptr[T] and gc_alloc[T] ========
+
+
+class W_GcPtrType(W_Type):
+    """
+    Pointer to a GC-managed instance of T.
+    Internally stores the address of a Box[PAYLOAD] where PAYLOAD is computed
+    based on whether T is a reference type or not.
+    """
+
+    def __init__(self, name, TO):
+        super().__init__(name)
+        self.TO = TO
+
+    def __call__(self, addr):
+        return W_GcPtrValue(addr, self)
+
+
+class W_GcPtrValue(W_Value):
+    @property
+    def addr(self):
+        return self._value
+
+    @property
+    def gc_base(self):
+        """Access the GC base (refcount and type) of the allocated object"""
+        T = self._spy_type.TO
+        PAYLOAD = gc_ptr_payload_type(T)
+        BOX_T = Box[PAYLOAD]
+        box = MEMORY.load(self.addr, BOX_T)
+        return box.base
+
+    def __getattr__(self, attr):
+        # Load the box from memory and access the payload
+        T = self._spy_type.TO
+        PAYLOAD = gc_ptr_payload_type(T)
+        BOX_T = Box[PAYLOAD]
+        box = MEMORY.load(self.addr, BOX_T)
+        return getattr(box.payload, attr)
+
+    def __setattr__(self, attr, value):
+        if attr in ("_value", "_spy_type"):
+            super().__setattr__(attr, value)
+        else:
+            # Load the box from memory and set on the payload
+            T = self._spy_type.TO
+            PAYLOAD = gc_ptr_payload_type(T)
+            BOX_T = Box[PAYLOAD]
+            box = MEMORY.load(self.addr, BOX_T)
+            setattr(box.payload, attr, value)
+
+
+@blue_generic
+def gc_ptr(T):
+    """
+    gc_ptr[T]: pointer to a GC-managed T
+    """
+    name = f"gc_ptr[{T.name}]"
+    return W_GcPtrType(name, T)
+
+
+@blue_generic
+def gc_alloc(T):
+    """
+    Allocate a GC-managed instance of T, return a gc_ptr[T].
+    This implicitly allocates a Box[PAYLOAD] where PAYLOAD depends on T.
+    """
+
+    def impl() -> gc_ptr[T]:
+        if T.is_box():
+            raise TypeError(f"Cannot allocate a Box type: {T.name}")
+
+        PAYLOAD = gc_ptr_payload_type(T)
+        BOX_T = Box[PAYLOAD]
+
+        addr = MEMORY.alloc(BOX_T)
+        ptr = gc_ptr[T](addr)
+        ptr.gc_base.ob_refcnt = i32(1)
+        ptr.gc_base.ob_type = T
+        return ptr
+
+    return impl

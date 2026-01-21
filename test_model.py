@@ -1,16 +1,18 @@
+import pytest
+
 from spyruntime import (
     W_Value,
     i32,
     w_type,
     get_type,
     struct,
-    gc_box_alloc,
-    gc_box_ptr,
     MEMORY,
-    W_GcBoxPtrValue,
     Box,
+    gc_ptr,
+    gc_alloc,
+    W_GcPtrValue,
 )
-from model import gc_ptr, gc_alloc, spy_object, W_GcPtrValue, ObjectObject
+from model import spy_object, ObjectObject
 
 # prebuilt values to be used in tests, just to make typing easier
 v0 = i32(0)
@@ -86,23 +88,6 @@ def test_Box():
     assert BT is BT2
 
 
-def test_gc_box_alloc():
-    ptr_box = gc_box_alloc[i32]()
-
-    # we stored a Box[i32] in memory
-    assert get_type(MEMORY.mem[ptr_box.addr]) is Box[i32]
-
-    # the static type is gc_box_ptr[i32]
-    assert get_type(ptr_box) is gc_box_ptr[i32]
-
-    # the type stored in the gc header is i32
-    assert ptr_box.base.ob_refcnt == i32(1)
-    assert ptr_box.base.ob_type is i32
-
-    # the payload is uninitialized
-    assert ptr_box.payload is None
-
-
 def test_gc_alloc():
     @struct
     class Point:
@@ -111,9 +96,16 @@ def test_gc_alloc():
 
     ptr = gc_alloc[Point]()
 
+    # ptr has type gc_ptr[Point]
+    assert get_type(ptr) is gc_ptr[Point]
+
     # ptr points to a **Box[Point]** in memory
     box = MEMORY.mem[ptr.addr]
     assert get_type(box) is Box[Point]
+
+    # we can access the GC base
+    assert ptr.gc_base.ob_refcnt == i32(1)
+    assert ptr.gc_base.ob_type is Point
 
     # we can read/write attributes OF THE PAYLOAD
     ptr.x = i32(1)
@@ -130,16 +122,22 @@ def test_spy_object():
     # instantiate an object, and check that we actually allocated a Box[ObjectObject]
     obj = spy_object.spy_new()
     ptr_obj = obj.__ref__
-    ptr_box = ptr_obj.as_box_ptr()
 
     assert isinstance(ptr_obj, W_GcPtrValue)
-    assert isinstance(ptr_box, W_GcBoxPtrValue)
-    assert ptr_obj.addr == ptr_box.addr
+    assert get_type(ptr_obj) is gc_ptr[spy_object]
 
-    BOX_PTR_T = get_type(ptr_box)
-    assert BOX_PTR_T is gc_box_ptr[spy_object]
-
-    box = MEMORY.mem[ptr_box.addr]
+    # The gc_ptr[spy_object] points to a Box[ObjectObject] in memory
+    box = MEMORY.mem[ptr_obj.addr]
     assert get_type(box) is Box[ObjectObject]
     assert box.base.ob_type is spy_object
     assert get_type(box.payload) is ObjectObject
+
+    # We can access the GC base through the gc_ptr
+    assert ptr_obj.gc_base.ob_refcnt == i32(1)
+    assert ptr_obj.gc_base.ob_type is spy_object
+
+
+def test_gc_alloc_box_error():
+    # Attempting to allocate a Box type should raise an error
+    with pytest.raises(TypeError, match="Cannot allocate a Box type"):
+        gc_alloc[Box[i32]]()
