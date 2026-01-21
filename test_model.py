@@ -1,7 +1,6 @@
 import pytest
 
 from spyruntime import (
-    W_Value,
     i32,
     w_type,
     get_type,
@@ -123,8 +122,11 @@ def test_spy_object():
     # The gc_ptr[ObjectObject] points to a Box[ObjectObject] in memory
     box = MEMORY.mem[ptr_obj.addr]
     assert get_type(box) is Box[ObjectObject]
-    assert box.gc_header.ob_type is spy_object
     assert get_type(box.payload) is ObjectObject
+
+    # the dynamic type is spy_object
+    assert box.gc_header.ob_type is spy_object
+    assert get_type(obj) is spy_object
 
     # We can access the GC base through the gc_ptr
     assert ptr_obj.gc_header.ob_refcnt == i32(1)
