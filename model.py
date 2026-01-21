@@ -18,27 +18,9 @@ from spyruntime import (
     W_GcBoxPtrType,
     is_reference_type,
     gc_box_payload_type,
+    Box,
+    GcBase,
 )
-
-
-@struct.mut
-class GcBase:
-    ob_refcnt: i32
-    ob_type: w_type
-
-
-@blue_generic
-def Box(T):
-    assert not is_reference_type(T)
-
-    @struct.mut
-    class _Box:
-        base: GcBase
-        payload: T
-
-    name = f"Box[{T.name}]"
-    _Box.name = name
-    return _Box
 
 
 # ======= gc_ptr[T] and gc_alloc[T] ========

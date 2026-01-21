@@ -148,13 +148,17 @@ struct.mut = struct
 # ======= typeded heap simulation =====
 
 
+@struct.mut
+class GcBase:
+    ob_refcnt: i32
+    ob_type: w_type
+
+
 class Memory:
     def __init__(self):
         self.mem = {0: "NULL"}
 
     def alloc(self, T):
-        from model import GcBase
-
         # we can allocate only GC-managed memory in this simulation
         assert T.is_box()
         addr = max(self.mem) + 100
@@ -187,8 +191,6 @@ class W_GcBoxPtrValue(W_Value):
         return self._value
 
     def __getattr__(self, attr):
-        from model import Box
-
         # we expect to have a Box[T] at address "addr"
         BOX_PTR_T = self._spy_type  # gc_box_ptr[T]
         T = BOX_PTR_T.TO
@@ -213,8 +215,6 @@ def gc_box_alloc(T):
     """
     Allocate a GC-managed Box[T] and return a gc_box_ptr[T]
     """
-    from model import Box
-
     # this is the magic which makes is possible to call gc_alloc[str] and get a
     # Box[StringObject] with ob_type==str
     PAYLOAD = gc_box_payload_type(T)
@@ -249,3 +249,17 @@ def is_reference_type(T: W_Type) -> bool:
         and list(T.fields) == ["__ref__"]
         and isinstance(T.fields["__ref__"], W_GcPtrType)
     )
+
+
+@blue_generic
+def Box(T):
+    assert not is_reference_type(T)
+
+    @struct.mut
+    class _Box:
+        base: GcBase
+        payload: T
+
+    name = f"Box[{T.name}]"
+    _Box.name = name
+    return _Box
