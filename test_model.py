@@ -82,7 +82,7 @@ def test_Box():
     BT = Box[i32]
     assert BT.name == "Box[i32]"
     assert repr(BT) == "<spy type Box[i32]>"
-    assert list(BT.fields.keys()) == ["base", "payload"]
+    assert list(BT.fields.keys()) == ["gc_header", "payload"]
     assert BT.is_box()
     BT2 = Box[i32]
     assert BT is BT2
@@ -104,8 +104,8 @@ def test_gc_alloc():
     assert get_type(box) is Box[Point]
 
     # we can access the GC base
-    assert ptr.gc_base.ob_refcnt == i32(1)
-    assert ptr.gc_base.ob_type is Point
+    assert ptr.gc_header.ob_refcnt == i32(1)
+    assert ptr.gc_header.ob_type is Point
 
     # we can read/write attributes OF THE PAYLOAD
     ptr.x = i32(1)
@@ -130,12 +130,12 @@ def test_spy_object():
     # The gc_ptr[ObjectObject] points to a Box[ObjectObject] in memory
     box = MEMORY.mem[ptr_obj.addr]
     assert get_type(box) is Box[ObjectObject]
-    assert box.base.ob_type is spy_object
+    assert box.gc_header.ob_type is spy_object
     assert get_type(box.payload) is ObjectObject
 
     # We can access the GC base through the gc_ptr
-    assert ptr_obj.gc_base.ob_refcnt == i32(1)
-    assert ptr_obj.gc_base.ob_type is spy_object
+    assert ptr_obj.gc_header.ob_refcnt == i32(1)
+    assert ptr_obj.gc_header.ob_type is spy_object
 
 
 def test_gc_alloc_box_error():

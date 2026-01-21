@@ -14,7 +14,6 @@ from spyruntime import (
     W_Value,
     get_type,
     Box,
-    GcBase,
     gc_ptr,
     gc_alloc,
     W_GcPtrValue,

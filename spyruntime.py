@@ -147,13 +147,28 @@ def struct(cls=None):
 struct.mut = struct
 
 
-# ======= typeded heap simulation =====
+# ======= typed heap simulation =====
 
 
 @struct.mut
-class GcBase:
+class GcHeader:
     ob_refcnt: i32
     ob_type: w_type
+
+
+@blue_generic
+def Box(T):
+    if T.is_struct():
+        assert "__ref__" not in T.fields
+
+    @struct.mut
+    class _Box:
+        gc_header: GcHeader
+        payload: T
+
+    name = f"Box[{T.name}]"
+    _Box.name = name
+    return _Box
 
 
 class Memory:
@@ -164,7 +179,7 @@ class Memory:
         # we can allocate only GC-managed memory in this simulation
         assert T.is_box()
         addr = max(self.mem) + 100
-        self.mem[addr] = T(base=GcBase())  # uninitialized
+        self.mem[addr] = T(gc_header=GcHeader())  # uninitialized
         return addr
 
     def load(self, addr, expected_T):
@@ -174,21 +189,6 @@ class Memory:
 
 
 MEMORY = Memory()
-
-
-@blue_generic
-def Box(T):
-    if T.is_struct():
-        assert "__ref__" not in T.fields
-
-    @struct.mut
-    class _Box:
-        base: GcBase
-        payload: T
-
-    name = f"Box[{T.name}]"
-    _Box.name = name
-    return _Box
 
 
 # ======= gc_ptr[T] and gc_alloc[T] ========
@@ -215,12 +215,12 @@ class W_GcPtrValue(W_Value):
         return self._value
 
     @property
-    def gc_base(self):
+    def gc_header(self):
         """Access the GC base (refcount and type) of the allocated object"""
         T = self._spy_type.TO
         BOX_T = Box[T]
         box = MEMORY.load(self.addr, BOX_T)
-        return box.base
+        return box.gc_header
 
     def __getattr__(self, attr):
         # gc_ptr[T] always points to Box[T], access the payload
@@ -256,8 +256,8 @@ def gc_alloc(LLTYPE, HLTYPE=None):
 
     - LLTYPE must be a value type and it's the payload.
 
-    - HLTYPE is the type that it's stored in gc_base.ob_type, and it's what is returned
-      by get_type().
+    - HLTYPE is the type that it's stored in gc_header.ob_type, and it's what is
+      returned by get_type().
 
     We support two kinds of invocation:
 
@@ -284,8 +284,8 @@ def gc_alloc(LLTYPE, HLTYPE=None):
         BOX_T = Box[LLTYPE]
         addr = MEMORY.alloc(BOX_T)
         ptr = gc_ptr[LLTYPE](addr)
-        ptr.gc_base.ob_refcnt = i32(1)
-        ptr.gc_base.ob_type = HLTYPE
+        ptr.gc_header.ob_refcnt = i32(1)
+        ptr.gc_header.ob_type = HLTYPE
         return ptr
 
     return impl
