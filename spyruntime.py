@@ -55,12 +55,54 @@ class W_Type:
     def is_box(self) -> bool:
         return self.name.startswith("Box[")
 
+    def is_vararray(self) -> bool:
+        return False
+
     def __call__(self, value):
         """Allow instantiation: SPy_I32(42) returns W_Value"""
         return W_Value(value, self)
 
+    def __getitem__(self, size):
+        """Allow array syntax: i32[10] or i32[...]"""
+        if size is ...:
+            return W_VarArrayType(self)
+        else:
+            raise NotImplementedError("Fixed-size arrays not yet supported")
+
     def __repr__(self):
         return f"<spy type {self.name}>"
+
+
+class W_VarArrayType(W_Type):
+    """Variable-sized array type, e.g., u8[...]"""
+
+    def __init__(self, item_type: W_Type):
+        self.item_type = item_type
+        name = f"{item_type.name}[...]"
+        super().__init__(name)
+
+    def is_vararray(self) -> bool:
+        return True
+
+
+class W_VarArrayValue:
+    """
+    Wrapper for variable array access.
+    Supports indexing: arr[0], arr[1], etc.
+    """
+
+    def __init__(self, items: list, item_type: W_Type):
+        self.items = items
+        self.item_type = item_type
+
+    def __getitem__(self, index: int):
+        return self.items[index]
+
+    def __setitem__(self, index: int, value):
+        self.items[index] = value
+
+    def __len__(self):
+        return len(self.items)
 
 
 # Built-in types
@@ -70,6 +112,7 @@ w_object = W_Type("object")
 w_type = W_Type("type")
 
 i32 = w_i32  # just for convenience of typing
+u8 = w_u8  # just for convenience of typing
 
 
 def get_type(x):
@@ -88,9 +131,13 @@ class W_StructType(W_Type):
     def __init__(self, name: str, fields: dict[str, W_Type]) -> None:
         super().__init__(name)
         self.fields = fields
+        self.vararray_field = None  # name of the flexible array member, if any
 
     def is_struct(self) -> bool:
         return True
+
+    def has_vararray(self) -> bool:
+        return self.vararray_field is not None
 
     def __call__(self, **kwargs):
         for key in kwargs:
@@ -110,7 +157,14 @@ class W_StructType(W_Type):
 class W_StructValue(W_Value):
     def __getattr__(self, attr):
         if attr in self._value:
-            return self._value[attr]
+            val = self._value[attr]
+            # Check if this is a vararray field
+            if self._spy_type.vararray_field == attr:
+                field_type = self._spy_type.fields[attr]
+                assert isinstance(field_type, W_VarArrayType)
+                # Return a wrapper that supports indexing
+                return W_VarArrayValue(val, field_type.item_type)
+            return val
         raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
@@ -128,12 +182,21 @@ def struct(cls=None):
     """
 
     fields = {}
+    vararray_field = None
     assert hasattr(cls, "__annotations__")
-    for field_name, field_type in cls.__annotations__.items():
+    field_list = list(cls.__annotations__.items())
+    for idx, (field_name, field_type) in enumerate(field_list):
         assert isinstance(field_type, W_Type)
+        if field_type.is_vararray():
+            # flexible array member must be the last field
+            assert idx == len(field_list) - 1, \
+                f"Flexible array member {field_name} must be the last field"
+            assert vararray_field is None, "Only one flexible array member allowed"
+            vararray_field = field_name
         fields[field_name] = field_type
 
     struct_type = W_StructType(cls.__name__, fields)
+    struct_type.vararray_field = vararray_field
 
     # hack hack hack
     if hasattr(cls, "spy_new"):
@@ -289,3 +352,52 @@ def gc_alloc(LLTYPE, HLTYPE=None):
         return ptr
 
     return impl
+
+
+@blue_generic
+def gc_alloc_varsize(LLTYPE, HLTYPE=None):
+    """
+    Allocate a GC-managed object with a variable-sized array member.
+
+    Similar to gc_alloc, but the struct must have a flexible array member.
+    Returns a function that takes the array count as parameter.
+
+    Usage:
+        ptr = gc_alloc_varsize[StringData](5)  # allocates StringData with 5 array items
+    """
+    if LLTYPE.is_box():
+        raise TypeError(f"Cannot allocate a Box type: {LLTYPE.name}")
+
+    if not LLTYPE.is_struct():
+        raise TypeError(f"{LLTYPE.name} must be a struct with flexible array member")
+
+    if not LLTYPE.has_vararray():
+        raise TypeError(f"{LLTYPE.name} does not have a flexible array member")
+
+    if HLTYPE is None:
+        HLTYPE = LLTYPE
+    else:
+        assert HLTYPE.fields == {"__ref__": gc_ptr[LLTYPE]}
+
+    def alloc_with_count(count: int) -> gc_ptr[LLTYPE]:
+        BOX_T = Box[LLTYPE]
+        addr = MEMORY.alloc(BOX_T)
+        ptr = gc_ptr[LLTYPE](addr)
+        ptr.gc_header.ob_refcnt = i32(1)
+        ptr.gc_header.ob_type = HLTYPE
+
+        # Store the array count in a special attribute
+        # Initialize the variable array
+        vararray_field = LLTYPE.vararray_field
+        vararray_type = LLTYPE.fields[vararray_field]
+        assert vararray_type.is_vararray()
+
+        # Create a list to hold the array items
+        box = MEMORY.load(addr, BOX_T)
+        # Store array as a list in the vararray field
+        box.payload._value[vararray_field] = [None] * count
+        box.payload._value["__vararray_count__"] = count
+
+        return ptr
+
+    return alloc_with_count

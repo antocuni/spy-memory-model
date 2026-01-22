@@ -137,3 +137,39 @@ def test_gc_alloc_box_error():
     # Attempting to allocate a Box type should raise an error
     with pytest.raises(TypeError, match="Cannot allocate a Box type"):
         gc_alloc[Box[i32]]()
+
+
+def test_gc_alloc_varsize():
+    from spyruntime import gc_alloc_varsize, u8
+
+    @struct
+    class StringData:
+        length: i32
+        chars: u8[...]  # flexible array member
+
+    # alloc StringData + 5 extra items of chars
+    ptr = gc_alloc_varsize[StringData](5)
+
+    # verify the type
+    assert get_type(ptr) is gc_ptr[StringData]
+
+    # verify we can access regular fields
+    ptr.length = i32(4)
+    assert ptr.length == i32(4)
+
+    # verify we can access and modify the variable array
+    ptr.chars[0] = u8(ord("t"))
+    ptr.chars[1] = u8(ord("e"))
+    ptr.chars[2] = u8(ord("s"))
+    ptr.chars[3] = u8(ord("t"))
+    ptr.chars[4] = u8(ord("\0"))
+
+    # verify we can read back the values
+    assert ptr.chars[0] == u8(ord("t"))
+    assert ptr.chars[1] == u8(ord("e"))
+    assert ptr.chars[2] == u8(ord("s"))
+    assert ptr.chars[3] == u8(ord("t"))
+    assert ptr.chars[4] == u8(ord("\0"))
+
+    # verify the array has the right length
+    assert len(ptr.chars) == 5
