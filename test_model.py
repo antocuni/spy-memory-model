@@ -2,6 +2,7 @@ import pytest
 
 from spyruntime import (
     i32,
+    u8,
     w_type,
     get_type,
     struct,
@@ -173,3 +174,31 @@ def test_gc_alloc_varsize():
 
     # verify the array has the right length
     assert len(ptr.chars) == 5
+
+
+def test_spy_str():
+    from model import spy_str, StringObject
+
+    # create a spy_str using spy_new
+    s = spy_str.spy_new()
+
+    # verify the type
+    assert get_type(s) is spy_str
+
+    # verify the internal pointer points to StringObject
+    ptr = s.__ref__
+    assert get_type(ptr) is gc_ptr[StringObject]
+
+    # verify the GC header has the right type
+    assert ptr.gc_header.ob_type is spy_str
+
+    # verify we can access the fields
+    assert ptr.length == i32(4)
+    assert ptr.utf8[0] == u8(ord('t'))
+    assert ptr.utf8[1] == u8(ord('e'))
+    assert ptr.utf8[2] == u8(ord('s'))
+    assert ptr.utf8[3] == u8(ord('t'))
+    assert ptr.utf8[4] == u8(ord('\0'))
+
+    # verify _as_py_str works
+    assert s._as_py_str() == "test"

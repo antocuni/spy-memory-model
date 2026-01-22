@@ -165,6 +165,13 @@ class W_StructValue(W_Value):
                 # Return a wrapper that supports indexing
                 return W_VarArrayValue(val, field_type.item_type)
             return val
+        # Check if it's a method on the struct type
+        if hasattr(self._spy_type, attr):
+            method = getattr(self._spy_type, attr)
+            if callable(method):
+                # Bind the method to this instance
+                from functools import partial
+                return partial(method, self)
         raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
@@ -198,9 +205,12 @@ def struct(cls=None):
     struct_type = W_StructType(cls.__name__, fields)
     struct_type.vararray_field = vararray_field
 
-    # hack hack hack
-    if hasattr(cls, "spy_new"):
-        struct_type.spy_new = cls.spy_new
+    # Copy all methods from the class to the struct type
+    for name in dir(cls):
+        if not name.startswith('__'):
+            attr = getattr(cls, name)
+            if callable(attr):
+                setattr(struct_type, name, attr)
 
     return struct_type
 
