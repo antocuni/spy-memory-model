@@ -5,6 +5,7 @@ SPy runtime
 
 from dataclasses import dataclass
 from typing import Callable, Any
+from functools import partial
 import itertools
 
 
@@ -170,7 +171,6 @@ class W_StructValue(W_Value):
             method = getattr(self._spy_type, attr)
             if callable(method):
                 # Bind the method to this instance
-                from functools import partial
                 return partial(method, self)
         raise AttributeError(attr)
 
@@ -196,8 +196,9 @@ def struct(cls=None):
         assert isinstance(field_type, W_Type)
         if field_type.is_vararray():
             # flexible array member must be the last field
-            assert idx == len(field_list) - 1, \
+            assert idx == len(field_list) - 1, (
                 f"Flexible array member {field_name} must be the last field"
+            )
             assert vararray_field is None, "Only one flexible array member allowed"
             vararray_field = field_name
         fields[field_name] = field_type
@@ -207,7 +208,7 @@ def struct(cls=None):
 
     # Copy all methods from the class to the struct type
     for name in dir(cls):
-        if not name.startswith('__'):
+        if not name.startswith("__"):
             attr = getattr(cls, name)
             if callable(attr):
                 setattr(struct_type, name, attr)

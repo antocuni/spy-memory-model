@@ -194,11 +194,11 @@ def test_spy_str():
 
     # verify we can access the fields
     assert ptr.length == i32(4)
-    assert ptr.utf8[0] == u8(ord('t'))
-    assert ptr.utf8[1] == u8(ord('e'))
-    assert ptr.utf8[2] == u8(ord('s'))
-    assert ptr.utf8[3] == u8(ord('t'))
-    assert ptr.utf8[4] == u8(ord('\0'))
+    assert ptr.utf8[0] == u8(ord("t"))
+    assert ptr.utf8[1] == u8(ord("e"))
+    assert ptr.utf8[2] == u8(ord("s"))
+    assert ptr.utf8[3] == u8(ord("t"))
+    assert ptr.utf8[4] == u8(ord("\0"))
 
     # verify _as_py_str works
     assert s._as_py_str() == "test"
