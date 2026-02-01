@@ -227,17 +227,32 @@ struct.mut = struct
 @struct.mut
 class GcHeader:
     ob_refcnt: i32
+
+
+@struct.mut
+class ObjectObject:
+    gc_header: GcHeader
     ob_type: w_type
+
+
+def has_object_object_base(T):
+    """Check if T has ObjectObject as its 'base' field"""
+    if not T.is_struct():
+        return False
+    return T.fields.get("base") is ObjectObject
 
 
 @blue_generic
 def Box(T):
     if T.is_struct():
         assert "__ref__" not in T.fields
+        # If T already has ObjectObject base, Box[T] is a no-op
+        if has_object_object_base(T):
+            return T
 
     @struct.mut
     class _Box:
-        gc_header: GcHeader
+        base: ObjectObject
         payload: T
 
     name = f"Box[{T.name}]"
@@ -251,9 +266,10 @@ class Memory:
 
     def alloc(self, T):
         # we can allocate only GC-managed memory in this simulation
-        assert T.is_box()
+        # T must have ObjectObject as 'base' field
+        assert has_object_object_base(T)
         addr = max(self.mem) + 100
-        self.mem[addr] = T(gc_header=GcHeader())  # uninitialized
+        self.mem[addr] = T(base=ObjectObject(gc_header=GcHeader()))  # uninitialized
         return addr
 
     def load(self, addr, expected_T):
@@ -289,29 +305,37 @@ class W_GcPtrValue(W_Value):
         return self._value
 
     @property
-    def gc_header(self):
-        """Access the GC base (refcount and type) of the allocated object"""
+    def base(self):
+        """Access the ObjectObject at the start of the allocated object"""
         T = self._spy_type.TO
         BOX_T = Box[T]
         box = MEMORY.load(self.addr, BOX_T)
-        return box.gc_header
+        return box.base
 
     def __getattr__(self, attr):
-        # gc_ptr[T] always points to Box[T], access the payload
         T = self._spy_type.TO
         BOX_T = Box[T]
         box = MEMORY.load(self.addr, BOX_T)
-        return getattr(box.payload, attr)
+        # If Box[T] == T (no-op), access directly
+        # Otherwise access through payload
+        if BOX_T is T:
+            return getattr(box, attr)
+        else:
+            return getattr(box.payload, attr)
 
     def __setattr__(self, attr, value):
         if attr in ("_value", "_spy_type"):
             super().__setattr__(attr, value)
         else:
-            # gc_ptr[T] always points to Box[T], set on the payload
             T = self._spy_type.TO
             BOX_T = Box[T]
             box = MEMORY.load(self.addr, BOX_T)
-            setattr(box.payload, attr, value)
+            # If Box[T] == T (no-op), set directly
+            # Otherwise set through payload
+            if BOX_T is T:
+                setattr(box, attr, value)
+            else:
+                setattr(box.payload, attr, value)
 
 
 @blue_generic
@@ -330,7 +354,7 @@ def gc_alloc(LLTYPE, HLTYPE=None):
 
     - LLTYPE must be a value type and it's the payload.
 
-    - HLTYPE is the type that it's stored in gc_header.ob_type, and it's what is
+    - HLTYPE is the type that it's stored in ob_type, and it's what is
       returned by get_type().
 
     We support two kinds of invocation:
@@ -341,10 +365,9 @@ def gc_alloc(LLTYPE, HLTYPE=None):
     - gc_alloc[T, V] if you want to customize the dynamic type. The main use case is to
       allocate reference types, e.g. gc_alloc[ObjectObject, spy_object].
 
-    Under the hood, it allocates a Box[T], which contains the needed GC header, but this
-    is transparent to the user.
+    Box[T] is a no-op if T already has ObjectObject, so we always allocate Box[LLTYPE].
 
-    In both cases, it returns gc_ptr[T].
+    Returns gc_ptr[LLTYPE].
     """
     if LLTYPE.is_box():
         raise TypeError(f"Cannot allocate a Box type: {LLTYPE.name}")
@@ -358,8 +381,8 @@ def gc_alloc(LLTYPE, HLTYPE=None):
         BOX_T = Box[LLTYPE]
         addr = MEMORY.alloc(BOX_T)
         ptr = gc_ptr[LLTYPE](addr)
-        ptr.gc_header.ob_refcnt = i32(1)
-        ptr.gc_header.ob_type = HLTYPE
+        ptr.base.gc_header.ob_refcnt = i32(1)
+        ptr.base.ob_type = HLTYPE
         return ptr
 
     return impl
@@ -393,21 +416,27 @@ def gc_alloc_varsize(LLTYPE, HLTYPE=None):
     def alloc_with_count(count: int) -> gc_ptr[LLTYPE]:
         BOX_T = Box[LLTYPE]
         addr = MEMORY.alloc(BOX_T)
-        ptr = gc_ptr[LLTYPE](addr)
-        ptr.gc_header.ob_refcnt = i32(1)
-        ptr.gc_header.ob_type = HLTYPE
+        box = MEMORY.load(addr, BOX_T)
 
-        # Store the array count in a special attribute
+        # If Box[T] == T (no-op), payload is the box itself
+        # Otherwise payload is box.payload
+        if BOX_T is LLTYPE:
+            payload = box
+        else:
+            payload = box.payload
+
+        ptr = gc_ptr[LLTYPE](addr)
+        ptr.base.gc_header.ob_refcnt = i32(1)
+        ptr.base.ob_type = HLTYPE
+
         # Initialize the variable array
         vararray_field = LLTYPE.vararray_field
         vararray_type = LLTYPE.fields[vararray_field]
         assert vararray_type.is_vararray()
 
-        # Create a list to hold the array items
-        box = MEMORY.load(addr, BOX_T)
         # Store array as a list in the vararray field
-        box.payload._value[vararray_field] = [None] * count
-        box.payload._value["__vararray_count__"] = count
+        payload._value[vararray_field] = [None] * count
+        payload._value["__vararray_count__"] = count
 
         return ptr
 

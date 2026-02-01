@@ -6,3 +6,6 @@ Playground for experimenting with different design of memory models for SPy.
   builtin types, `@blue_generic` decorator, a simulation of the heap, etc.
 
 - `model.py`: this is code which in real world will be implemented in `*.spy` files
+
+
+Moreover, `PLAN.spy` contains a pseudocode version of them, probably easier to follow.

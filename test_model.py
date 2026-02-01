@@ -75,7 +75,7 @@ def test_Box():
     BT = Box[i32]
     assert BT.name == "Box[i32]"
     assert repr(BT) == "<spy type Box[i32]>"
-    assert list(BT.fields.keys()) == ["gc_header", "payload"]
+    assert list(BT.fields.keys()) == ["base", "payload"]
     assert BT.is_box()
     BT2 = Box[i32]
     assert BT is BT2
@@ -96,9 +96,9 @@ def test_gc_alloc():
     box = MEMORY.mem[ptr.addr]
     assert get_type(box) is Box[Point]
 
-    # we can access the GC base
-    assert ptr.gc_header.ob_refcnt == i32(1)
-    assert ptr.gc_header.ob_type is Point
+    # we can access the GC header and ob_type through .base
+    assert ptr.base.gc_header.ob_refcnt == i32(1)
+    assert ptr.base.ob_type is Point
 
     # we can read/write attributes OF THE PAYLOAD
     ptr.x = i32(1)
@@ -126,12 +126,12 @@ def test_spy_object():
     assert get_type(box.payload) is ObjectObject
 
     # the dynamic type is spy_object
-    assert box.gc_header.ob_type is spy_object
+    assert box.base.ob_type is spy_object
     assert get_type(obj) is spy_object
 
-    # We can access the GC base through the gc_ptr
-    assert ptr_obj.gc_header.ob_refcnt == i32(1)
-    assert ptr_obj.gc_header.ob_type is spy_object
+    # We can access the GC header and ob_type through the gc_ptr's .base
+    assert ptr_obj.base.gc_header.ob_refcnt == i32(1)
+    assert ptr_obj.base.ob_type is spy_object
 
 
 def test_gc_alloc_box_error():
@@ -189,8 +189,8 @@ def test_spy_str():
     ptr = s.__ref__
     assert get_type(ptr) is gc_ptr[StringObject]
 
-    # verify the GC header has the right type
-    assert ptr.gc_header.ob_type is spy_str
+    # verify the ob_type is set correctly
+    assert ptr.base.ob_type is spy_str
 
     # verify we can access the fields
     assert ptr.length == i32(4)

@@ -19,15 +19,11 @@ from spyruntime import (
     gc_alloc,
     gc_alloc_varsize,
     W_GcPtrValue,
+    ObjectObject,
 )
 
 
 # ======= high level object model ========
-
-
-@struct
-class ObjectObject:
-    "Implementation struct for object (empty)"
 
 
 @struct

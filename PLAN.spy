@@ -1,0 +1,162 @@
+"""
+This is a pseudo-code version of the content of spyruntime.py and model.py, which
+should be easier to follow without all the implementation details needed by the
+simulation.
+"""
+
+
+@blue.generic
+def gc_ptr(T):
+    """
+    All GC-allocated objects must have ObjectObject as 'base' field
+    """
+    assert T.fields["base"] is ObjectObject
+    return ...
+
+
+@struct
+class GcHeader:
+    """
+    The exact content of this depends on the GC. Here we simulate refcounting
+    """
+
+    ob_refcnt: i32
+
+
+@struct
+class ObjectObject:
+    """
+    The base struct for all heap-allocated objects
+    """
+
+    gc_header: GcHeader
+    ob_type: spy_type
+
+
+@struct
+class spy_object:
+    """
+    The `object` app-level type
+    """
+
+    __ref__: gc_ptr[ObjectObject]
+
+    def __new__():
+        # gc_alloc[lltype, hltype]
+        ptr = gc_alloc[ObjectObject, spy_object]()
+        return spy_object(__ref__=ptr)
+
+
+@struct
+class TypeObject:
+    base: ObjectObject
+    visit: VisitorFunc  # visit all the children, used by GC
+    ...
+
+
+@struct
+class spy_type:
+    """
+    The `type` app-level type
+    """
+
+    __ref__: gc_ptr[TypeObject]
+
+
+@blue.generic
+def Box(T):
+    """
+    GC-allocated version of an arbitrary struct.
+
+    If T already has ObjectObject as 'base' field, Box[T] is a no-op and returns T.
+    Otherwise, creates a wrapper struct with base: ObjectObject and payload: T.
+    """
+    if T.fields.get("base") is ObjectObject:
+        # T already has ObjectObject, no need for extra boxing
+        return T
+
+    @struct
+    class _Box:
+        base: ObjectObject
+        payload: T
+
+    return _Box
+
+
+@struct
+class StringObject:
+    base: ObjectObject
+    length: i32
+    chars: u8[...]  # varsized struct
+
+
+@struct
+class spy_str:
+    """
+    The `str` app-level type
+    """
+
+    __ref__: gc_ptr[StringObject]
+
+
+@blue.generic
+def gc_alloc(T, HLTYPE=None):
+    """
+    Allocate a GC-managed object.
+
+    - T must be a value type and it's the payload.
+
+    - HLTYPE is the type that it's stored in base.ob_type, and it's what is
+      returned by get_dynamic_type().
+
+    We support two kinds of invocation:
+
+    - gc_alloc[T]: in this case, the dynamic type is equal to the payload type. E.g. if
+      you have a `@struct Point`, you can gc_alloc[Point]().
+
+    - gc_alloc[T, V] if you want to customize the dynamic type. The main use case is to
+      allocate reference types, e.g. gc_alloc[ObjectObject, spy_object].
+
+    Box[T] is a no-op if T already has ObjectObject as 'base' field, so we always use
+    Box[T] without checking.
+
+    Returns gc_ptr[T].
+    """
+    BoxT = Box[T]
+
+    if HLTYPE is None:
+        HLTYPE = T
+
+    ptr = allocate(BoxT)
+    ptr.base.gc_header.ob_refcnt = 1
+    ptr.base.ob_type = HLTYPE
+    return ptr
+
+
+def get_dynamic_type(o: spy_object):
+    """
+    Implementation of vm.dynamic_type()
+    """
+    ptr: gc_ptr[ObjectObject] = o.__ref__
+    return ptr.base.ob_type
+
+
+# Example 1: Point doesn't have ObjectObject base, so Box[Point] creates wrapper
+# with base: ObjectObject and payload: Point
+ptr = gc_alloc[Point]()
+# ptr has type gc_ptr[Point], points to Box[Point] in memory
+# get_dynamic_type still returns Point (the HLTYPE parameter)
+assert ptr.base.ob_type is Point
+
+# Example 2: StringObject has ObjectObject base, so Box[StringObject] is a no-op
+# and returns StringObject itself
+ptr_str = gc_alloc[StringObject, spy_str]()
+# ptr_str has type gc_ptr[StringObject], points to StringObject directly in memory
+# get_dynamic_type returns spy_str (the HLTYPE parameter)
+assert ptr_str.base.ob_type is spy_str
+
+# Example 3: ObjectObject allocation for spy_object
+obj = spy_object.__new__()  # calls gc_alloc[ObjectObject, spy_object]()
+# ObjectObject doesn't have base field, so Box[ObjectObject] creates wrapper
+# But the dynamic type is spy_object, not ObjectObject
+assert obj.__ref__.base.ob_type is spy_object
