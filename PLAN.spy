@@ -5,15 +5,6 @@ simulation.
 """
 
 
-@blue.generic
-def gc_ptr(T):
-    """
-    All GC-allocated objects must have ObjectObject as 'base' field
-    """
-    assert T.fields["base"] is ObjectObject
-    return ...
-
-
 @struct
 class GcHeader:
     """
@@ -99,6 +90,10 @@ class spy_str:
     __ref__: gc_ptr[StringObject]
 
 
+class gc_ptr[T]:
+    "GC-managed pointer"
+
+
 @blue.generic
 def gc_alloc(T, HLTYPE=None):
     """
@@ -116,9 +111,6 @@ def gc_alloc(T, HLTYPE=None):
 
     - gc_alloc[T, V] if you want to customize the dynamic type. The main use case is to
       allocate reference types, e.g. gc_alloc[ObjectObject, spy_object].
-
-    Box[T] is a no-op if T already has ObjectObject as 'base' field, so we always use
-    Box[T] without checking.
 
     Returns gc_ptr[T].
     """
